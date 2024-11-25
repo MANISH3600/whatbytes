@@ -83,35 +83,39 @@ def send_test_email(request):
     except Exception as e:
         return HttpResponse(f"Error sending email: {str(e)}")
 
+
+from .tasks import send_password_reset_email  # Import the Celery task
 def password_reset_request(request):
     if request.method == "POST":
+        print("Request received for password reset.")
         form = PasswordResetForm(request.POST)
         if form.is_valid():
             email = form.cleaned_data["email"]
-            associated_users = User.objects.filter(email=email)
-            if associated_users.exists():
-                for user in associated_users:
-                    subject = "Password Reset Requested"
-                    email_content = (
-                        f"Hello {user.username},\n\n"
-                        f"Please click the link below to reset your password:\n\n"
-                        f"http://{request.get_host()}/reset/{urlsafe_base64_encode(str(user.pk).encode())}/{default_token_generator.make_token(user)}\n\n"
-                        "If you did not request a password reset, please ignore this email.\n\n"
-                        "Thanks,\nWebsite Team"
-                    )
-                    try:
-                        send_mail(subject, email_content, 'guptamanish1006@gmail.com', [user.email])
-                    except Exception as e:
-                        print(f"Failed to send email to {user.email}. Error: {e}")
-                    
+            try:
+                user = User.objects.get(email=email)  # Fetch the user directly
+                print(f"User found: {user}")
+
+                subject = "Password Reset Requested"
+                email_content = (
+                    f"Hello {user.username},\n\n"
+                    f"Please click the link below to reset your password:\n\n"
+                    f"http://{request.get_host()}/reset/{urlsafe_base64_encode(str(user.pk).encode())}/{default_token_generator.make_token(user)}\n\n"
+                    "If you did not request a password reset, please ignore this email.\n\n"
+                    "Thanks,\nWebsite Team"
+                )
+                send_password_reset_email.delay(subject, email_content, user.email)
+                print(f"Password reset email sent to {user.email}")
+
                 messages.success(request, "If this email is associated with an account, we have sent you a password reset email.")
                 return redirect("logins")
-            else:
+            except User.DoesNotExist:
+                print(f"No user found with email: {email}")
                 messages.error(request, "No account found with that email address.")
     else:
         form = PasswordResetForm()
-    
+
     return render(request, "whatbytes/password_reset.html", {"form": form})
+
 
 def password_reset_confirm(request, uidb64, token):
     try:
